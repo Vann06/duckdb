@@ -21,6 +21,8 @@ Comportamiento:
     los meses de 2026 existen todavia. El script consulta al servidor que
     meses estan publicados en lugar de suponerlos.
   - Un archivo que ya existe localmente no se vuelve a descargar.
+  - Antes de omitirlo, se comprueba que tenga la firma PAR1 de un archivo
+    Parquet. Un archivo incompleto o corrupto se descarga nuevamente.
   - La descarga se hace sobre un nombre temporal y solo se renombra al
     terminar, de modo que una interrupcion no deja archivos .parquet a medias.
 """
@@ -74,6 +76,20 @@ def formato_tamanio(n: float) -> str:
     return f"{n:.1f} GiB"
 
 
+def es_parquet_valido(ruta: Path) -> bool:
+    """Comprueba las firmas PAR1 del inicio y final de un archivo Parquet."""
+    if not ruta.exists() or ruta.stat().st_size < 8:
+        return False
+    try:
+        with ruta.open("rb") as archivo:
+            inicio = archivo.read(4)
+            archivo.seek(-4, 2)
+            final = archivo.read(4)
+    except OSError:
+        return False
+    return inicio == b"PAR1" and final == b"PAR1"
+
+
 def descargar_archivo(url: str, destino: Path) -> int:
     """Descarga `url` en `destino`. Devuelve la cantidad de bytes escritos."""
     destino.parent.mkdir(parents=True, exist_ok=True)
@@ -92,6 +108,8 @@ def descargar_archivo(url: str, destino: Path) -> int:
                             escritos += len(bloque)
             if escritos == 0:
                 raise requests.RequestException("el servidor devolvio un archivo vacio")
+            if not es_parquet_valido(temporal):
+                raise requests.RequestException("el contenido descargado no es un Parquet valido")
             temporal.replace(destino)
             return escritos
         except requests.RequestException as error:
@@ -112,10 +130,13 @@ def descargar(tipo: str) -> dict:
         etiqueta = f"{ANIO}-{mes:02d}"
         destino = ruta_destino(tipo, mes)
 
-        if destino.exists() and destino.stat().st_size > 0:
+        if es_parquet_valido(destino):
             print(f"  {etiqueta}  ya existe, se omite")
             resumen["omitidos"] += 1
             continue
+
+        if destino.exists():
+            print(f"  {etiqueta}  archivo local invalido; se descargara nuevamente")
 
         url = construir_url(tipo, mes)
         if not esta_publicado(url):
