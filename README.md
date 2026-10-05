@@ -34,7 +34,7 @@ duckdb/
 ## Datos
 
 El repositorio incluye `scripts/download_data.py`, que descarga los archivos de
-2026 publicados por la TLC (`--help` muestra las opciones disponibles). Los
+2024 y 2026 publicados por la TLC (`--help` muestra las opciones disponibles). Los
 archivos se guardan en `data/raw/<tipo>/<anio>/`.
 
 Los datos descargados **no deben incluirse en el repositorio Git**. El archivo
@@ -112,18 +112,25 @@ docker compose logs --tail 100 metabase
 
 ## Como descargar los datos
 
-El script inicial descarga los meses publicados de taxis amarillos y verdes de
-2026:
+Sin argumentos, el script descarga los meses publicados de taxis amarillos y
+verdes de 2024 y 2026:
 
 ```bash
 docker compose exec lab python scripts/download_data.py
 ```
 
-Tambien es posible descargar un solo tipo de taxi:
+Para reproducir solo el conjunto inicial del Ejercicio 2 o elegir un tipo:
 
 ```bash
+docker compose exec lab python scripts/download_data.py --years 2026
 docker compose exec lab python scripts/download_data.py --taxi yellow
 docker compose exec lab python scripts/download_data.py --taxi green
+```
+
+Para incorporar 2024 en el Ejercicio 5 conservando 2026:
+
+```bash
+docker compose exec lab python scripts/download_data.py --years 2024 2026
 ```
 
 Los archivos se almacenan en:
@@ -131,7 +138,13 @@ Los archivos se almacenan en:
 ```text
 data/raw/yellow/2026/yellow_tripdata_2026-MM.parquet
 data/raw/green/2026/green_tripdata_2026-MM.parquet
+data/raw/yellow/2024/yellow_tripdata_2024-MM.parquet
+data/raw/green/2024/green_tripdata_2024-MM.parquet
 ```
+
+Antes de omitir un archivo existente, el programa valida las firmas Parquet.
+Por eso se puede ejecutar varias veces: conserva los archivos validos y solo
+descarga los que falten o esten incompletos.
 
 ### 2.6. Cambios realizados al script
 
@@ -205,3 +218,77 @@ las observaciones escritas.
 
 Para repetir el analisis despues de descargar un nuevo mes se utiliza el mismo
 comando. No es necesario importar previamente los datos a una tabla DuckDB.
+
+## Ejercicio 4: analisis exploratorio
+
+Las ocho preguntas, consultas y justificaciones estan versionadas en
+`sql/02_analisis_exploratorio.sql`. Incluyen evolucion temporal, patrones por
+hora, caracteristicas del viaje, diferencias Yellow/Green, pagos, propinas,
+percentiles, valores atipicos y rutas frecuentes.
+
+Ejecute el analisis sobre 2026 con:
+
+```bash
+docker compose exec -T lab python scripts/run_eda.py
+```
+
+El comando genera `docs/ejercicio_4_resultados.md`, que incluye cada consulta,
+su resultado, su interpretacion y al menos tres hallazgos calculados desde los
+datos. Se usa 2026 intencionalmente porque este ejercicio precede a la
+incorporacion de 2024.
+
+## Ejercicio 5: incorporar y validar 2024
+
+Descargue ambos anios y ejecute la validacion conjunta:
+
+```bash
+docker compose exec lab python scripts/download_data.py --years 2024 2026
+docker compose exec -T lab python scripts/validate_incremental.py
+```
+
+La validacion ejecuta `sql/03_validacion_incremental.sql` y genera
+`docs/ejercicio_5_validacion.md`. Comprueba la cobertura mensual, cuenta los
+registros de ambos anios en una sola consulta y ejecuta una comparacion anual.
+El documento tambien explica los cambios necesarios para ampliar las consultas
+del Ejercicio 4.
+
+## Ejercicio 6: benchmark Parquet versus DuckDB
+
+Con los archivos de 2024 y 2026 disponibles, ejecute:
+
+```bash
+docker compose exec -T lab python scripts/run_benchmark.py
+```
+
+El programa:
+
+1. normaliza y materializa ambos tipos de taxi en
+   `data/processed/taxi_benchmark.duckdb`;
+2. ejecuta las mismas tres consultas desde Parquet y desde la tabla DuckDB;
+3. mide por separado 2024, 2026 y el conjunto 2024+2026;
+4. repite cada medicion tres veces y registra la primera ejecucion y la mediana
+   de las siguientes;
+5. genera `docs/ejercicio_6_benchmark.csv` y
+   `docs/ejercicio_6_resultados.md`.
+
+Para cambiar la cantidad de repeticiones o medir un solo anio:
+
+```bash
+docker compose exec -T lab python scripts/run_benchmark.py --iterations 5
+docker compose exec -T lab python scripts/run_benchmark.py --years 2026
+```
+
+La base materializada es un artefacto reproducible y esta ignorada por Git. El
+tiempo de construccion se informa por separado: no se incluye artificialmente
+dentro del tiempo de cada consulta, pero debe considerarse al decidir entre
+ambas estrategias.
+
+## Secuencia completa de los ejercicios 4 al 6
+
+```bash
+docker compose up --build -d
+docker compose exec lab python scripts/download_data.py --years 2024 2026
+docker compose exec -T lab python scripts/run_eda.py
+docker compose exec -T lab python scripts/validate_incremental.py
+docker compose exec -T lab python scripts/run_benchmark.py
+```
