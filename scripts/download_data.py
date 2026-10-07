@@ -2,14 +2,14 @@
 """Descarga archivos Parquet del NYC TLC Trip Record Data.
 
 Descarga los registros de viajes de taxis amarillos (yellow) y verdes (green)
-correspondientes a los anios solicitados. Para los ejercicios 4 a 6 se usan
-2024 y 2026.
+correspondientes a los anios solicitados. Desde el Ejercicio 8 se usan
+2024, 2025 y 2026.
 
 Fuente oficial de los datos:
     https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page
 
 Uso:
-    python scripts/download_data.py                 # 2024 y 2026, ambos tipos
+    python scripts/download_data.py                 # 2024, 2025 y 2026, ambos tipos
     python scripts/download_data.py --years 2024
     python scripts/download_data.py --taxi yellow
     python scripts/download_data.py --taxi green
@@ -26,6 +26,8 @@ Comportamiento:
     Parquet. Un archivo incompleto o corrupto se descarga nuevamente.
   - La descarga se hace sobre un nombre temporal y solo se renombra al
     terminar, de modo que una interrupcion no deja archivos .parquet a medias.
+  - Tambien descarga la tabla de zonas TLC (data/raw/zones/taxi_zone_lookup.csv),
+    que traduce PULocationID/DOLocationID a barrio y nombre de zona.
 """
 
 import argparse
@@ -34,10 +36,12 @@ from pathlib import Path
 
 import requests
 
-ANIOS_PREDETERMINADOS = (2024, 2026)
+ANIOS_PREDETERMINADOS = (2024, 2025, 2026)
 TIPOS_TAXI = ("yellow", "green")
 URL_BASE = "https://d37ci6vzurychx.cloudfront.net/trip-data"
 DIR_DESTINO = Path("data/raw")
+URL_ZONAS = "https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv"
+RUTA_ZONAS = DIR_DESTINO / "zones" / "taxi_zone_lookup.csv"
 
 TIEMPO_ESPERA = 60          # segundos por peticion
 INTENTOS = 3                # intentos por archivo antes de darse por vencido
@@ -158,6 +162,36 @@ def descargar(tipo: str, anio: int) -> dict:
     return resumen
 
 
+def descargar_zonas() -> bool:
+    """Descarga la tabla de zonas TLC (LocationID -> barrio y zona) si falta."""
+    if ruta_zonas_valida(RUTA_ZONAS):
+        print(f"\nTabla de zonas ya existe: {RUTA_ZONAS}")
+        return True
+    RUTA_ZONAS.parent.mkdir(parents=True, exist_ok=True)
+    temporal = RUTA_ZONAS.with_name(RUTA_ZONAS.name + SUFIJO_TEMPORAL)
+    try:
+        respuesta = requests.get(URL_ZONAS, timeout=TIEMPO_ESPERA)
+        respuesta.raise_for_status()
+        temporal.write_bytes(respuesta.content)
+        if not ruta_zonas_valida(temporal):
+            raise requests.RequestException("el contenido no es la tabla de zonas esperada")
+        temporal.replace(RUTA_ZONAS)
+    except requests.RequestException as error:
+        temporal.unlink(missing_ok=True)
+        print(f"\nERROR al descargar la tabla de zonas: {error}")
+        return False
+    print(f"\nTabla de zonas descargada: {RUTA_ZONAS}")
+    return True
+
+
+def ruta_zonas_valida(ruta: Path) -> bool:
+    """La tabla de zonas es un CSV cuyo encabezado empieza con LocationID."""
+    if not ruta.exists():
+        return False
+    with ruta.open("rb") as archivo:
+        return archivo.read(12).lstrip(b"\xef\xbb\xbf\"").startswith(b"LocationID")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Descarga datos mensuales de taxis del NYC TLC."
@@ -172,7 +206,7 @@ def main() -> int:
         nargs="+",
         default=list(ANIOS_PREDETERMINADOS),
         metavar="ANIO",
-        help="anios que se descargaran (por defecto: 2024 2026)",
+        help="anios que se descargaran (por defecto: 2024 2025 2026)",
     )
     argumentos = parser.parse_args()
 
@@ -190,6 +224,9 @@ def main() -> int:
             total["omitidos"] += resumen["omitidos"]
             total["no_publicados"] += [f"{tipo} {m}" for m in resumen["no_publicados"]]
             total["fallidos"] += [f"{tipo} {m}" for m in resumen["fallidos"]]
+
+    if not descargar_zonas():
+        total["fallidos"].append("taxi_zone_lookup.csv")
 
     print("\n" + "=" * 60)
     print("RESUMEN")

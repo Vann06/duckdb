@@ -4,6 +4,18 @@ data/processed/**
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 
+# DuckDB: bases y archivos temporales fuera de data/processed. Con un limite de
+# memoria, DuckDB escribe en .tmp/ del directorio de trabajo cuando no le alcanza.
+*.duckdb
+*.duckdb.wal
+.tmp/
+
+# Credenciales (por ejemplo MB_EMAIL y MB_PASSWORD de Metabase)
+.env
+
+# Descargas interrumpidas de scripts/download_data.py
+*.part
+
 # Python
 __pycache__/
 *.py[cod]
@@ -20,3 +32,8 @@ venv/
 Thumbs.db
 .idea/
 .vscode/
+.claude/settings.local.json
+node_modules/
+
+# Archivos de bloqueo de Word mientras el informe esta abierto
+~$*

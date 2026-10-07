@@ -34,8 +34,9 @@ duckdb/
 ## Datos
 
 El repositorio incluye `scripts/download_data.py`, que descarga los archivos de
-2024 y 2026 publicados por la TLC (`--help` muestra las opciones disponibles). Los
-archivos se guardan en `data/raw/<tipo>/<anio>/`.
+2024, 2025 y 2026 publicados por la TLC (`--help` muestra las opciones disponibles).
+Los archivos se guardan en `data/raw/<tipo>/<anio>/`. Tambien descarga la tabla de
+zonas TLC en `data/raw/zones/taxi_zone_lookup.csv`.
 
 Los datos descargados **no deben incluirse en el repositorio Git**. El archivo
 `.gitignore` ya contiene las reglas para ignorar los archivos Parquet descargados y
@@ -99,6 +100,31 @@ docker compose logs --tail 100 metabase
 - **Requests**: descarga automatizada de archivos.
 - **Metabase**: construccion de indicadores y tableros.
 
+### 1.6. Importancia de un ambiente reproducible
+
+En un proyecto de analisis de datos los resultados dependen tanto de los datos
+como del software que los procesa. Un cambio de version en DuckDB, Pandas o
+PyArrow puede alterar tipos de datos, funciones disponibles o incluso resultados
+numericos. Usar Docker con versiones fijadas en `requirements.txt` y en las
+imagenes base nos da varias ventajas:
+
+- **Mismos resultados para todos**: cada integrante, el docente o cualquier
+  revisor ejecuta exactamente el mismo Python, las mismas bibliotecas y la misma
+  version del driver de DuckDB en Metabase. Las cifras de los documentos se
+  pueden volver a obtener con los mismos comandos.
+- **Evita el "en mi maquina si funciona"**: el ambiente no depende del sistema
+  operativo ni de lo que cada persona tenga instalado localmente.
+- **Puesta en marcha rapida**: un solo `docker compose up --build -d` deja
+  listos JupyterLab, DuckDB y Metabase, sin instalaciones manuales.
+- **Compatibilidad entre herramientas**: DuckDB en Python y el driver de
+  Metabase deben usar la misma version para leer la misma base; fijarlas evita
+  errores de formato.
+- **Trazabilidad**: el ambiente queda versionado en Git junto con el codigo y
+  las consultas, de modo que cualquier resultado se puede asociar a la
+  configuracion exacta que lo produjo.
+- **Aislamiento**: las dependencias del laboratorio no interfieren con otros
+  proyectos instalados en la computadora.
+
 ### Proposito de los directorios
 
 - `data/raw/`: archivos originales descargados desde la TLC. No se versionan.
@@ -113,7 +139,7 @@ docker compose logs --tail 100 metabase
 ## Como descargar los datos
 
 Sin argumentos, el script descarga los meses publicados de taxis amarillos y
-verdes de 2024 y 2026:
+verdes de 2024, 2025 y 2026, ademas de la tabla de zonas:
 
 ```bash
 docker compose exec lab python scripts/download_data.py
@@ -283,12 +309,90 @@ tiempo de construccion se informa por separado: no se incluye artificialmente
 dentro del tiempo de cada consulta, pero debe considerarse al decidir entre
 ambas estrategias.
 
-## Secuencia completa de los ejercicios 4 al 6
+## Ejercicio 7: indicadores y tablero
+
+Los diez indicadores (pregunta, justificacion, consulta, grafico e
+interpretacion) estan en `sql/06_indicadores.sql`. Se calculan sobre una base
+DuckDB materializada, porque el tablero repite las mismas consultas cada vez
+que se abre:
+
+```bash
+# 1. Construye data/processed/taxi.duckdb y docs/ejercicio_7_indicadores.md
+docker compose stop metabase
+docker compose exec -T lab python scripts/build_indicadores.py
+docker compose start metabase
+
+# 2. Crea o actualiza las preguntas y el tablero en Metabase
+docker compose exec -T -e MB_EMAIL=<correo> -e MB_PASSWORD=<clave> lab python scripts/setup_metabase.py
+```
+
+- Modelo de datos: `sql/05_modelo_indicadores.sql` (tabla `viajes`, tabla
+  `zonas` y vista `viajes_validos`).
+- Tablero: Metabase en <http://localhost:3000>, coleccion "Lab 8 - Indicadores".
+- Registro de consultas y tablero en notebook: `notebooks/07_indicadores.ipynb`.
+- Documentacion generada: `docs/ejercicio_7_indicadores.md`.
+
+Metabase abre la base en modo solo lectura. DuckDB no permite reconstruirla
+mientras otro proceso la tiene abierta; por eso se detiene Metabase antes del
+paso 1. La tabla de zonas (`data/raw/zones/taxi_zone_lookup.csv`) la descarga
+`scripts/download_data.py`.
+
+## Ejercicio 8: incorporar 2025
+
+El descargador usa por defecto 2024, 2025 y 2026. Los indicadores no requieren
+cambios de SQL: basta con reconstruir la base y volver a generar el tablero.
+
+```bash
+docker compose exec lab python scripts/download_data.py
+docker compose stop metabase
+docker compose exec -T lab python scripts/build_indicadores.py
+docker compose start metabase
+docker compose exec -T lab python scripts/run_ejercicio_8.py
+docker compose exec -T -e MB_EMAIL=<correo> -e MB_PASSWORD=<clave> lab python scripts/setup_metabase.py
+```
+
+- Validacion y analisis: `sql/07_ejercicio_8.sql`.
+- Resultados y patrones 2024-2026: `docs/ejercicio_8_resultados.md`.
+- Notebook: `notebooks/08_incorporacion_2025.ipynb`.
+- Registros de las dos ejecuciones del descargador: `docs/ejercicio_8_descarga*.log`.
+
+## Ejercicio 9: discusion
+
+Las respuestas a las preguntas 9.1 a 9.8 estan en `docs/ejercicio_9_discusion.md`.
+
+## Entregables por ejercicio
+
+| Ejercicio | Consultas | Scripts | Resultados | Notebook |
+|---|---|---|---|---|
+| 1 | - | - | `README.md` (1.4 a 1.6) | `01_ambiente_y_descarga` |
+| 2 | - | `download_data.py` | `README.md` (2.6 y 2.7) | `01_ambiente_y_descarga` |
+| 3 | `sql/01_exploracion_inicial.sql` | `run_exploration.py` | `docs/ejercicio_3_*.md` | `03_exploracion_parquet` |
+| 4 | `sql/02_analisis_exploratorio.sql` | `run_eda.py` | `docs/ejercicio_4_resultados.md` | `04_analisis_exploratorio` |
+| 5 | `sql/03_validacion_incremental.sql` | `validate_incremental.py` | `docs/ejercicio_5_validacion.md` | `05_incorporacion_2024` |
+| 6 | `sql/04_benchmark.sql` | `run_benchmark.py` | `docs/ejercicio_6_*` | `06_benchmark_parquet_vs_duckdb` |
+| 7 | `sql/05_modelo_indicadores.sql`, `sql/06_indicadores.sql` | `build_indicadores.py`, `setup_metabase.py` | `docs/ejercicio_7_indicadores.md`, tablero en Metabase | `07_indicadores` |
+| 8 | `sql/07_ejercicio_8.sql` | `run_ejercicio_8.py` | `docs/ejercicio_8_*` | `08_incorporacion_2025` |
+| 9 | - | - | `docs/ejercicio_9_discusion.md` | - |
+
+Los notebooks estan en `notebooks/` y se abren en JupyterLab
+(<http://localhost:8888>). No duplican SQL: leen las mismas consultas de `sql/`
+mediante `notebooks/lab_utils.py`.
+
+## Secuencia completa
+
+Los ejercicios 5 y 6 se ejecutaron originalmente con 2024 y 2026; sus scripts
+siguen limitados a esos anios para conservar esa etapa.
 
 ```bash
 docker compose up --build -d
-docker compose exec lab python scripts/download_data.py --years 2024 2026
-docker compose exec -T lab python scripts/run_eda.py
-docker compose exec -T lab python scripts/validate_incremental.py
-docker compose exec -T lab python scripts/run_benchmark.py
+docker compose exec lab python scripts/download_data.py          # 2024, 2025 y 2026
+docker compose exec -T lab python scripts/run_exploration.py     # Ejercicio 3
+docker compose exec -T lab python scripts/run_eda.py             # Ejercicio 4
+docker compose exec -T lab python scripts/validate_incremental.py  # Ejercicio 5
+docker compose exec -T lab python scripts/run_benchmark.py       # Ejercicio 6
+docker compose stop metabase
+docker compose exec -T lab python scripts/build_indicadores.py   # Ejercicio 7
+docker compose start metabase
+docker compose exec -T lab python scripts/run_ejercicio_8.py     # Ejercicio 8
+docker compose exec -T -e MB_EMAIL=<correo> -e MB_PASSWORD=<clave> lab python scripts/setup_metabase.py
 ```
